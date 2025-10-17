@@ -1,0 +1,228 @@
+version: '3'
+
+vars:
+  PYTHON: python3
+  VENV: .venv
+  MODELS_DIR: models
+  DATA_DIR: data
+  LOGS_DIR: logs
+  MLFLOW_URI: http://localhost:5000
+
+tasks:
+  default:
+    desc: "Show available tasks"
+    cmds:
+      - task --list
+
+  setup:
+    desc: "Setup complete development environment"
+    cmds:
+      - echo "🚀 Setting up Neuro-Symbolic Code Generation AI environment..."
+      - task: check-dependencies
+      - task: create-dirs
+      - task: install-poetry
+      - task: install-deps
+      - task: install-tree-sitter-languages
+      - task: setup-mlflow
+      - echo "✅ Environment setup complete!"
+
+  check-dependencies:
+    desc: "Check system dependencies"
+    cmds:
+      - echo "🔍 Checking system dependencies..."
+      - which python3 || (echo "❌ Python 3.10+ required" && exit 1)
+      - python3 --version | grep -E "3\.(10|11|12)" || (echo "❌ Python 3.10+ required" && exit 1)
+      - echo "✅ Python version OK"
+
+  create-dirs:
+    desc: "Create necessary directories"
+    cmds:
+      - mkdir -p {{.MODELS_DIR}}/{pretrained,finetuned,checkpoints}
+      - mkdir -p {{.DATA_DIR}}/{raw,processed,benchmarks}
+      - mkdir -p {{.LOGS_DIR}}/{training,evaluation,mlflow}
+      - mkdir -p src/neurosymbolic_codegen/{core,orchestration,rag,security,utils}
+      - mkdir -p tests/{unit,integration,benchmarks}
+      - mkdir -p configs
+      - mkdir -p .argo-workflows
+      - echo "✅ Directory structure created"
+
+  install-poetry:
+    desc: "Install Poetry package manager"
+    cmds:
+      - |
+        if ! command -v poetry &> /dev/null; then
+          echo "📦 Installing Poetry..."
+          curl -sSL https://install.python-poetry.org | python3 -
+          echo "✅ Poetry installed"
+        else
+          echo "✅ Poetry already installed"
+        fi
+    silent: false
+
+  install-deps:
+    desc: "Install Python dependencies using Poetry"
+    cmds:
+      - echo "📦 Installing Python dependencies..."
+      - poetry install --no-root
+      - echo "✅ Dependencies installed"
+
+  install-tree-sitter-languages:
+    desc: "Install tree-sitter language grammars"
+    cmds:
+      - echo "🌳 Installing tree-sitter language grammars..."
+      - poetry run python scripts/setup_tree_sitter.py
+      - echo "✅ Tree-sitter grammars installed"
+
+  setup-mlflow:
+    desc: "Setup MLflow tracking server"
+    cmds:
+      - echo "📊 Setting up MLflow..."
+      - mkdir -p {{.LOGS_DIR}}/mlflow
+      - echo "✅ MLflow directory created. Run 'task mlflow:start' to start tracking server"
+
+  download-models:
+    desc: "Download pre-trained models (interactive)"
+    cmds:
+      - echo "📥 Downloading pre-trained models..."
+      - poetry run python scripts/download_models.py
+      - echo "✅ Models downloaded to {{.MODELS_DIR}}/pretrained/"
+
+  prepare-data:
+    desc: "Download and prepare training data"
+    cmds:
+      - echo "📥 Preparing training data..."
+      - poetry run python scripts/prepare_data.py
+      - echo "✅ Data prepared in {{.DATA_DIR}}/"
+
+  download-benchmarks:
+    desc: "Download benchmark datasets (HumanEval++, MBPP+)"
+    cmds:
+      - echo "📥 Downloading benchmark datasets..."
+      - poetry run python scripts/download_benchmarks.py
+      - echo "✅ Benchmarks downloaded to {{.DATA_DIR}}/benchmarks/"
+
+  train:
+    desc: "Start training pipeline (local)"
+    cmds:
+      - echo "🔥 Starting training pipeline..."
+      - poetry run python -m neurosymbolic_codegen.train --config configs/training_config.yaml
+  
+  train:distributed:
+    desc: "Start distributed training with DeepSpeed"
+    cmds:
+      - echo "🚀 Starting distributed training..."
+      - poetry run deepspeed --num_gpus=4 src/neurosymbolic_codegen/train.py --config configs/training_config.yaml --deepspeed configs/deepspeed_config.json
+
+  finetune:
+    desc: "Fine-tune model with LoRA/PEFT"
+    cmds:
+      - echo "🎯 Starting fine-tuning..."
+      - poetry run python -m neurosymbolic_codegen.finetune --config configs/finetune_config.yaml
+
+  evaluate:
+    desc: "Evaluate model on benchmarks"
+    cmds:
+      - echo "📊 Running evaluation..."
+      - poetry run python -m neurosymbolic_codegen.evaluate --config configs/eval_config.yaml
+
+  test:
+    desc: "Run all tests"
+    cmds:
+      - echo "🧪 Running tests..."
+      - poetry run pytest
+
+  test:unit:
+    desc: "Run unit tests only"
+    cmds:
+      - poetry run pytest tests/unit -v
+
+  test:integration:
+    desc: "Run integration tests only"
+    cmds:
+      - poetry run pytest tests/integration -v
+
+  test:benchmarks:
+    desc: "Run benchmark evaluation tests"
+    cmds:
+      - poetry run pytest tests/benchmarks -v
+
+  lint:
+    desc: "Run code linting and formatting"
+    cmds:
+      - echo "🔍 Running linters..."
+      - poetry run black src/ tests/
+      - poetry run isort src/ tests/
+      - poetry run mypy src/
+      - poetry run flake8 src/ tests/
+      - echo "✅ Linting complete"
+
+  security:scan:
+    desc: "Run security analysis"
+    cmds:
+      - echo "🔒 Running security scan..."
+      - poetry run bandit -r src/ -ll
+      - echo "✅ Security scan complete"
+
+  mlflow:start:
+    desc: "Start MLflow tracking server"
+    cmds:
+      - echo "📊 Starting MLflow tracking server..."
+      - poetry run mlflow server --backend-store-uri sqlite:///{{.LOGS_DIR}}/mlflow/mlflow.db --default-artifact-root {{.LOGS_DIR}}/mlflow/artifacts --host 0.0.0.0 --port 5000
+
+  mlflow:ui:
+    desc: "Open MLflow UI"
+    cmds:
+      - echo "🌐 MLflow UI available at {{.MLFLOW_URI}}"
+      - open {{.MLFLOW_URI}} || xdg-open {{.MLFLOW_URI}} || echo "Please open {{.MLFLOW_URI}} in your browser"
+
+  demo:
+    desc: "Run interactive demo"
+    cmds:
+      - echo "🎮 Starting interactive demo..."
+      - poetry run python -m neurosymbolic_codegen.demo
+
+  argo:install:
+    desc: "Install ArgoWorkflows manifests to K8s cluster"
+    cmds:
+      - echo "⚙️  Installing ArgoWorkflows manifests..."
+      - kubectl apply -f .argo-workflows/
+      - echo "✅ ArgoWorkflows manifests installed"
+
+  argo:submit:train:
+    desc: "Submit training workflow to Argo"
+    cmds:
+      - echo "🚀 Submitting training workflow..."
+      - argo submit .argo-workflows/training-workflow.yaml
+
+  argo:submit:evaluate:
+    desc: "Submit evaluation workflow to Argo"
+    cmds:
+      - echo "📊 Submitting evaluation workflow..."
+      - argo submit .argo-workflows/evaluation-workflow.yaml
+
+  clean:
+    desc: "Clean generated files and caches"
+    cmds:
+      - echo "🧹 Cleaning..."
+      - rm -rf __pycache__ .pytest_cache .mypy_cache .coverage htmlcov
+      - find . -type d -name "__pycache__" -exec rm -rf {} + 2>/dev/null || true
+      - echo "✅ Cleanup complete"
+
+  clean:models:
+    desc: "Remove downloaded models (WARNING: large files)"
+    cmds:
+      - echo "⚠️  This will delete all downloaded models!"
+      - rm -rf {{.MODELS_DIR}}/pretrained/*
+      - rm -rf {{.MODELS_DIR}}/finetuned/*
+      - echo "✅ Models removed"
+
+  docs:
+    desc: "Generate documentation"
+    cmds:
+      - echo "📚 Generating documentation..."
+      - echo "Documentation available in docs/"
+
+  help:
+    desc: "Show detailed help"
+    cmds:
+      - cat docs/SETUP_GUIDE.md
