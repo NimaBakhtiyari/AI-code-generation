@@ -1,1 +1,193 @@
-
+apiVersion: argoproj.io/v1alpha1
+kind: Workflow
+metadata:
+  generateName: neurosymbolic-evaluation-
+  labels:
+    app: neurosymbolic-codegen
+    workflow-type: evaluation
+spec:
+  entrypoint: evaluation-pipeline
+  
+  arguments:
+    parameters:
+    - name: model-checkpoint
+      value: "/workspace/models/finetuned/latest"
+    - name: benchmarks
+      value: "humaneval,mbpp,codecontests"
+  
+  volumeClaimTemplates:
+  - metadata:
+      name: workspace
+    spec:
+      accessModes: [ "ReadWriteOnce" ]
+      resources:
+        requests:
+          storage: 50Gi
+  
+  templates:
+  - name: evaluation-pipeline
+    steps:
+    - - name: setup-evaluation
+        template: setup-env
+    - - name: download-benchmarks
+        template: download-benchmark-data
+        arguments:
+          parameters:
+          - name: benchmarks
+            value: "{{workflow.parameters.benchmarks}}"
+    - - name: run-evaluations
+        template: parallel-evaluation
+        arguments:
+          parameters:
+          - name: model-checkpoint
+            value: "{{workflow.parameters.model-checkpoint}}"
+    - - name: aggregate-results
+        template: aggregate-metrics
+    - - name: generate-report
+        template: evaluation-report
+  
+  - name: setup-env
+    container:
+      image: python:3.11-slim
+      command: ["/bin/bash", "-c"]
+      args:
+        - |
+          apt-get update && apt-get install -y curl git
+          curl -sSL https://install.python-poetry.org | python3 -
+          export PATH="/root/.local/bin:$PATH"
+          cd /workspace
+          poetry install
+      volumeMounts:
+      - name: workspace
+        mountPath: /workspace
+  
+  - name: download-benchmark-data
+    inputs:
+      parameters:
+      - name: benchmarks
+    container:
+      image: python:3.11-slim
+      command: ["/bin/bash", "-c"]
+      args:
+        - |
+          cd /workspace
+          poetry run python scripts/download_benchmarks.py \
+            --benchmarks {{inputs.parameters.benchmarks}}
+      volumeMounts:
+      - name: workspace
+        mountPath: /workspace
+  
+  - name: parallel-evaluation
+    inputs:
+      parameters:
+      - name: model-checkpoint
+    parallelism: 3
+    steps:
+    - - name: eval-humaneval
+        template: run-benchmark
+        arguments:
+          parameters:
+          - name: benchmark-name
+            value: "humaneval"
+          - name: model-checkpoint
+            value: "{{inputs.parameters.model-checkpoint}}"
+      - name: eval-mbpp
+        template: run-benchmark
+        arguments:
+          parameters:
+          - name: benchmark-name
+            value: "mbpp"
+          - name: model-checkpoint
+            value: "{{inputs.parameters.model-checkpoint}}"
+      - name: eval-codecontests
+        template: run-benchmark
+        arguments:
+          parameters:
+          - name: benchmark-name
+            value: "codecontests"
+          - name: model-checkpoint
+            value: "{{inputs.parameters.model-checkpoint}}"
+  
+  - name: run-benchmark
+    inputs:
+      parameters:
+      - name: benchmark-name
+      - name: model-checkpoint
+    container:
+      image: python:3.11-slim
+      command: ["/bin/bash", "-c"]
+      args:
+        - |
+          cd /workspace
+          poetry run python -m neurosymbolic_codegen.evaluate \
+            --benchmark {{inputs.parameters.benchmark-name}} \
+            --model {{inputs.parameters.model-checkpoint}} \
+            --output /workspace/logs/evaluation/{{inputs.parameters.benchmark-name}}.json
+      volumeMounts:
+      - name: workspace
+        mountPath: /workspace
+    outputs:
+      artifacts:
+      - name: benchmark-results
+        path: /workspace/logs/evaluation/{{inputs.parameters.benchmark-name}}.json
+  
+  - name: aggregate-metrics
+    container:
+      image: python:3.11-slim
+      command: ["/bin/bash", "-c"]
+      args:
+        - |
+          cd /workspace
+          poetry run python -c "
+          import json
+          import glob
+          
+          results = {}
+          for file in glob.glob('/workspace/logs/evaluation/*.json'):
+              with open(file) as f:
+                  data = json.load(f)
+                  benchmark = file.split('/')[-1].replace('.json', '')
+                  results[benchmark] = data
+          
+          with open('/workspace/logs/evaluation/aggregated_results.json', 'w') as f:
+              json.dump(results, f, indent=2)
+          
+          print('Aggregated results saved')
+          "
+      volumeMounts:
+      - name: workspace
+        mountPath: /workspace
+  
+  - name: evaluation-report
+    container:
+      image: python:3.11-slim
+      command: ["/bin/bash", "-c"]
+      args:
+        - |
+          cd /workspace
+          cat > /workspace/evaluation_report.md << 'EOF'
+          # Neuro-Symbolic Code Generation - Evaluation Report
+          
+          ## Summary
+          
+          Evaluation completed for benchmarks: HumanEval++, MBPP+, CodeContests
+          
+          ## Results
+          
+          Results available in: /workspace/logs/evaluation/aggregated_results.json
+          
+          ## Next Steps
+          
+          - Review detailed metrics
+          - Compare with baseline models
+          - Identify areas for improvement
+          EOF
+          
+          echo "Evaluation report generated"
+      volumeMounts:
+      - name: workspace
+        mountPath: /workspace
+    outputs:
+      artifacts:
+      - name: evaluation-report
+        path: /workspace/evaluation_report.md
