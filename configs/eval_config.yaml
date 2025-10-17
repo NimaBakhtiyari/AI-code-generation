@@ -1,0 +1,81 @@
+# Evaluation Configuration for Neuro-Symbolic Code Generation AI
+
+# Model Configuration
+model:
+  checkpoint_path: "models/finetuned/latest"
+  device: "cuda"  # or "cpu"
+  dtype: "bfloat16"  # or "float16", "float32"
+
+# Benchmarks
+benchmarks:
+  humaneval:
+    enabled: true
+    dataset_path: "data/benchmarks/humaneval"
+    num_samples: 164
+    pass_at_k: [1, 10, 100]
+    temperature: [0.2, 0.6, 0.8]
+    
+  mbpp:
+    enabled: true
+    dataset_path: "data/benchmarks/mbpp"
+    num_samples: 500
+    pass_at_k: [1, 10, 100]
+    temperature: [0.2, 0.6, 0.8]
+    
+  codecontests:
+    enabled: true
+    dataset_path: "data/benchmarks/codecontests"
+    num_samples: 165
+    pass_at_k: [1, 10]
+    temperature: [0.2, 0.8]
+
+# Generation Parameters
+generation:
+  max_new_tokens: 512
+  top_p: 0.95
+  top_k: 50
+  repetition_penalty: 1.0
+  do_sample: true
+  num_return_sequences: 10
+
+# Code Execution
+execution:
+  timeout: 10  # seconds
+  max_memory: "2GB"
+  sandbox: true
+  languages: ["python", "javascript", "java", "cpp"]
+
+# Metrics
+metrics:
+  - "pass@k"
+  - "code_bleu"
+  - "exact_match"
+  - "edit_distance"
+  - "compilation_rate"
+  - "test_pass_rate"
+  
+# Reward Model Evaluation
+reward_evaluation:
+  enabled: true
+  test_coverage_threshold: 0.8
+  security_risk_threshold: 0.3
+  quality_score_threshold: 0.7
+
+# Output
+output:
+  results_dir: "logs/evaluation"
+  save_predictions: true
+  save_generated_code: true
+  generate_report: true
+
+# Parallel Execution
+parallelism:
+  enabled: true
+  num_workers: 4
+  batch_size: 8
+
+# Logging
+logging:
+  log_level: "INFO"
+  log_file: "logs/evaluation/eval.log"
+  progress_bar: true

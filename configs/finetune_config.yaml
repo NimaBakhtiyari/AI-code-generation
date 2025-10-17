@@ -1,0 +1,100 @@
+# Fine-tuning Configuration with LoRA/PEFT
+
+# Base Model
+base_model:
+  name: "deepseek-coder-6.7b"
+  path: "models/pretrained/deepseek-coder-6.7b"
+  load_in_8bit: false
+  load_in_4bit: true  # QLoRA for memory efficiency
+
+# PEFT Configuration (LoRA)
+peft:
+  enabled: true
+  peft_type: "LORA"
+  task_type: "CAUSAL_LM"
+  
+  lora:
+    r: 16  # LoRA rank
+    lora_alpha: 32
+    lora_dropout: 0.05
+    target_modules:
+      - "q_proj"
+      - "v_proj"
+      - "k_proj"
+      - "o_proj"
+      - "gate_proj"
+      - "up_proj"
+      - "down_proj"
+    bias: "none"
+    fan_in_fan_out: false
+    inference_mode: false
+
+# Training Parameters
+training:
+  num_epochs: 3
+  batch_size: 4
+  gradient_accumulation_steps: 8
+  learning_rate: 3.0e-4
+  max_grad_norm: 0.3
+  warmup_ratio: 0.03
+  
+  # Optimizer
+  optimizer:
+    type: "paged_adamw_32bit"
+    weight_decay: 0.001
+  
+  # Scheduler
+  lr_scheduler:
+    type: "cosine"
+    num_warmup_steps: 100
+
+# Data Configuration
+data:
+  train_dataset: "data/processed/finetune_train"
+  eval_dataset: "data/processed/finetune_eval"
+  max_seq_length: 2048
+  packing: true  # Pack multiple sequences for efficiency
+
+# Quantization (QLoRA)
+quantization:
+  load_in_4bit: true
+  bnb_4bit_compute_dtype: "bfloat16"
+  bnb_4bit_use_double_quant: true
+  bnb_4bit_quant_type: "nf4"
+
+# Checkpointing
+checkpoint:
+  save_dir: "models/finetuned"
+  save_steps: 500
+  save_total_limit: 3
+  resume_from_checkpoint: null
+
+# Logging
+logging:
+  log_dir: "logs/finetuning"
+  logging_steps: 50
+  eval_steps: 500
+  report_to: ["mlflow", "tensorboard"]
+
+# MLflow
+mlflow:
+  tracking_uri: "http://localhost:5000"
+  experiment_name: "neurosymbolic-finetune"
+
+# Evaluation during training
+evaluation:
+  eval_strategy: "steps"
+  eval_steps: 500
+  per_device_eval_batch_size: 2
+
+# Mixed Precision
+mixed_precision:
+  fp16: false
+  bf16: true
+  tf32: true  # For Ampere GPUs
+
+# Memory Optimization
+memory_optimization:
+  gradient_checkpointing: true
+  max_memory: null  # Auto-detect
+  low_cpu_mem_usage: true
